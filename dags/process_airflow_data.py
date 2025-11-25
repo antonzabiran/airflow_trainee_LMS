@@ -1,4 +1,5 @@
 import os
+from io import StringIO
 import pandas as pd
 
 from airflow import DAG
@@ -20,53 +21,78 @@ default_args = {
 # ищет CSV в папке
 def process_file_func(**kwargs):
     file_path = "/opt/airflow/data/incoming/example_input.csv"
-    kwargs['ti'].xcom_push(key='csv_file_arg', value=file_path)
     print("файл найдет :", file_path)
+    kwargs['ti'].xcom_push(key='csv_file_arg', value=file_path)
     return file_path
 
 # читает CSV и выводит датафрейм
 def file_read_csv_func(**kwargs):
-    full_path = kwargs['ti'].xcom_pull(task_ids='process_file', key='csv_file_arg')
-    print("читаем файл =", full_path)
-    df = pd.read_csv(full_path)
-    print(df)
-    return df
+    ti = kwargs["ti"]
+    file_path = ti.xcom_pull(task_ids="process_file_task", key='csv_file_arg')
+
+    print("Читаем файл:", file_path)
+
+    if not file_path:
+        raise ValueError("Путь к CSV НЕ получен из XCom!")
+
+    df = pd.read_csv(file_path)
+    json_str = df.to_json(orient = 'records')
+    ti.xcom_push(key="df_raw", value=json_str)
+
 
 def branch_logic(**kwargs):
-    file_path = kwargs['ti'].xcom_pull(task_ids='process_file', key='csv_file_arg')
-    df = pd.read_csv(file_path)
-
+    ti = kwargs["ti"]
+    json_str = ti.xcom_pull(task_ids="file_read_csv", key="df_raw")
+    df = pd.read_json(json_str)
+    print("Проверяю пустой ли DF:", df)
     if df.empty:
-        print("файл пустой")
+        print("Файл пустой")
         return "log_empty_file"
     else:
-        print("файл не пустой")
+        print("Файл не пустой")
         return "process_task.replace_null"
 
 def replace_nulls_func(**kwargs):
-    file_path = kwargs['ti'].xcom_pull(task_ids ='process_file', key='csv_file_arg')
+    file_path = kwargs['ti'].xcom_pull(
+        task_ids='process_file_task',
+        key='csv_file_arg'
+    )
+    print(f'ya tut {file_path}')
     df = pd.read_csv(file_path)
 
-    new_df = df.replace(["null", ""], "-")
-    df = new_df.fillna("-")
+    df["content"] = df["content"].replace(["null", ""], "-")
+    df["content"] = df["content"].fillna("-")
 
     json_str = df.to_json(orient="records")
     kwargs['ti'].xcom_push(key="not_null", value=json_str)
 
 # сортировка по дате создания 
 def sort_data_by_created_date(**kwargs):
-    json_str = kwargs['ti'].xcom_pull(key="not_null")
-    df = pd.read_json(json_str)
-    df["created_date"] = pd.to_datetime(df["created_date"])
-    sort_values = df.sort_values(by="created_date")
-    to_json = sort_values.to_json(orient="records")
-    kwargs['ti'].xcom_push(key='sorted_date', value=to_json)
+    ti = kwargs['ti']
+    json_str = ti.xcom_pull(
+        task_ids='process_task.replace_null',
+        key='not_null'
+    )
+    print("я тут")
+
+    df = pd.read_json(StringIO(json_str))
+    print("я тут2")
+
+    df["created_date"] = pd.to_datetime(df["created_date"], errors="coerce")
+
+    df = df.sort_values(by="created_date")
+
+    to_json = df.to_json(orient="records")
+    ti.xcom_push(key='sorted_date', value=to_json)
+
 
 # убираем лишние символы и смайлики 
 def clear_text(**kwargs):
-    json_str = kwargs['ti'].xcom_pull(key='sorted_date')
-    df = pd.read_json(json_str)
-
+    json_str = kwargs['ti'].xcom_pull(
+        task_ids = 'process_task.sort_data',
+        key='sorted_date')
+    df = pd.read_json(StringIO(json_str))
+    print(f'мы здесь')
     df["content"] = df["content"].str.replace(
         r"[^A-Za-zА-Яа-я0-9 .,!?-]", "", regex=True
     )
@@ -76,7 +102,7 @@ def clear_text(**kwargs):
 
 
 with DAG(
-    dag_ids='waiting_file_data',
+    dag_id='waiting_file_data',
     default_args=default_args,
     description="This DAG waiting file",
     schedule='@daily',
@@ -85,7 +111,7 @@ with DAG(
 
     # ждет появления файла 
     wait_for_file = FileSensor(
-        task_ids='wait_for_file',
+        task_id='wait_for_file',
         filepath='/opt/airflow/data/incoming/example_input.csv',
         poke_interval=10,
         timeout=60 * 5
@@ -93,7 +119,7 @@ with DAG(
 
     # ищет CSV файл и передает его в икском 
     process_file_task = PythonOperator(
-        task_id='process_file',
+        task_id='process_file_task',
         python_callable=process_file_func
     )
 
