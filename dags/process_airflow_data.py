@@ -45,7 +45,7 @@ def file_read_csv_func(**kwargs):
     print("Читаем файл:", file_path)
 
     if not file_path:
-        raise ValueError("Путь к CSV НЕ получен из XCom!")
+        raise ValueError("Путь к CSV НЕ получен")
 
     df = pd.read_csv(file_path)
     json_str = df.to_json(orient='records')
