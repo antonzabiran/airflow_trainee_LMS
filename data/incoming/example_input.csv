@@ -1,4 +1,21 @@
-id,content,created_date
-1,Hello 😀,2024-11-23
-2,null,2024-11-20
-3,Some text!!! 🤯,
+created_date,content,rating
+2025-11-20,Great product!,5
+2025-11-22,I love it ❤️😊,5
+2025-11-21,null,3
+2025-11-25,Ok,4
+2025-11-19,,2
+2025-11-23,Bad quality!!! #fail,1
+2025-01-15,Happy New Year 🎉,5
+2025-12-31,Future comment??,4
+2025-11-20,Nice__product**,4
+2025-11-24,Hi,5
+2025-11-22,Average,3
+2025-11-21,🔥Fire🔥,5
+2025-11-20,null,1
+2025-11-25,Long comment for testing database storage.,4
+2025-11-18,Delivery was late...,2
+2025-11-19,No,1
+2025-11-23,Привет world! @admin,5
+2025-11-22,,3
+2025-11-21,Great product!,5
+2025-11-24,Recommended!!!,5

@@ -8,8 +8,18 @@ from airflow.operators.python import PythonOperator, BranchPythonOperator
 from airflow.operators.bash import BashOperator
 from airflow.providers.standard.sensors.filesystem import FileSensor
 from airflow.utils.task_group import TaskGroup
+from airflow.datasets import Dataset
 
-# настройки даг 
+
+# Директория для сохранения датасета
+INPUT_FILE = "/opt/airflow/data/incoming/example_input.csv"
+TMP_FILE = "/opt/airflow/data/processed/temp_data.json"
+FINAL_FILE = "/opt/airflow/data/processed/final.json"
+
+# Датасет который будет тригеррить второй даг
+my_ds = Dataset(f"file://{FINAL_FILE}")
+
+# НАСТРОЙКИ DAG
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
@@ -18,14 +28,16 @@ default_args = {
     'retry_delay': timedelta(minutes=5)
 }
 
-# ищет CSV в папке
+
+# Ищет CSV в папке
 def process_file_func(**kwargs):
-    file_path = "/opt/airflow/data/incoming/example_input.csv"
+    file_path = INPUT_FILE
     print("файл найдет :", file_path)
     kwargs['ti'].xcom_push(key='csv_file_arg', value=file_path)
     return file_path
 
-# читает CSV и выводит датафрейм
+
+# Читает CSV и выводит датафрейм
 def file_read_csv_func(**kwargs):
     ti = kwargs["ti"]
     file_path = ti.xcom_pull(task_ids="process_file_task", key='csv_file_arg')
@@ -36,7 +48,7 @@ def file_read_csv_func(**kwargs):
         raise ValueError("Путь к CSV НЕ получен из XCom!")
 
     df = pd.read_csv(file_path)
-    json_str = df.to_json(orient = 'records')
+    json_str = df.to_json(orient='records')
     ti.xcom_push(key="df_raw", value=json_str)
 
 
@@ -52,6 +64,7 @@ def branch_logic(**kwargs):
         print("Файл не пустой")
         return "process_task.replace_null"
 
+
 def replace_nulls_func(**kwargs):
     file_path = kwargs['ti'].xcom_pull(
         task_ids='process_file_task',
@@ -66,7 +79,8 @@ def replace_nulls_func(**kwargs):
     json_str = df.to_json(orient="records")
     kwargs['ti'].xcom_push(key="not_null", value=json_str)
 
-# сортировка по дате создания 
+
+# Сортировка по дате создания
 def sort_data_by_created_date(**kwargs):
     ti = kwargs['ti']
     json_str = ti.xcom_pull(
@@ -86,10 +100,10 @@ def sort_data_by_created_date(**kwargs):
     ti.xcom_push(key='sorted_date', value=to_json)
 
 
-# убираем лишние символы и смайлики 
+# Убираем лишние символы и смайлики
 def clear_text(**kwargs):
     json_str = kwargs['ti'].xcom_pull(
-        task_ids = 'process_task.sort_data',
+        task_ids='process_task.sort_data',
         key='sorted_date')
     df = pd.read_json(StringIO(json_str))
     print(f'мы здесь')
@@ -97,45 +111,49 @@ def clear_text(**kwargs):
         r"[^A-Za-zА-Яа-я0-9 .,!?-]", "", regex=True
     )
 
-    to_json_final = df.to_json(orient='records')
-    kwargs['ti'].xcom_push(key='clean_content', value=to_json_final)
+    df.to_json(TMP_FILE, orient='records', force_ascii=False)
+    os.replace(TMP_FILE, FINAL_FILE)
+
+    kwargs['ti'].xcom_push(
+        key='clean_content',
+        value=df.to_json(orient='records')
+    )
 
 
 with DAG(
-    dag_id='waiting_file_data',
-    default_args=default_args,
-    description="This DAG waiting file",
-    schedule='@daily',
-    catchup=False
+        dag_id='waiting_file_data',
+        default_args=default_args,
+        description="This DAG waiting file",
+        schedule='@daily',
+        catchup=False
 ) as dag:
-
-    # ждет появления файла 
+    # ждет появления файла
     wait_for_file = FileSensor(
         task_id='wait_for_file',
-        filepath='/opt/airflow/data/incoming/example_input.csv',
+        filepath=INPUT_FILE,
         poke_interval=10,
         timeout=60 * 5
     )
 
-    # ищет CSV файл и передает его в икском 
+    # ищет CSV файл и передает его в икском
     process_file_task = PythonOperator(
         task_id='process_file_task',
         python_callable=process_file_func
     )
 
-    # читает CSV и возвращает DataFrame 
+    # читает CSV и возвращает DataFrame
     file_read_csv_task = PythonOperator(
         task_id='file_read_csv',
         python_callable=file_read_csv_func
     )
 
-    # branch 
+    # branch
     branch_task = BranchPythonOperator(
         task_id='branch_task',
         python_callable=branch_logic
     )
 
-    # если файл пустой , то просто логируем 
+    # если файл пустой, то просто логируем
     log_empty_file = BashOperator(
         task_id='log_empty_file',
         bash_command='echo "file is empty"'
@@ -154,7 +172,8 @@ with DAG(
 
         task_3 = PythonOperator(
             task_id='clear_text',
-            python_callable=clear_text
+            python_callable=clear_text,
+            outlets=[my_ds]
         )
 
         task_1 >> task_2 >> task_3
