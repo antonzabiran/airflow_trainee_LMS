@@ -1,0 +1,20 @@
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+.venv/
+.DS_Store
+# Airflow
+logs/
+airflow.db
+airflow.cfg
+webserver_config.py
+*.log
+dags/__pycache__/
+plugins/__pycache__/
+config/__pycache__/
+.idea/
+.env
+docker/volumes/

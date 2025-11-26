@@ -78,7 +78,7 @@ def sort_data_by_created_date(**kwargs):
     df = pd.read_json(StringIO(json_str))
     print("я тут2")
 
-    df["created_date"] = pd.to_datetime(df["created_date"], errors="coerce")
+    df["created_date"] = pd.to_datetime(df["created_date"])
 
     df = df.sort_values(by="created_date")
 
